@@ -1,0 +1,4 @@
+# cp backend.hcl.example backend.hcl, fill in, then:
+#   terraform init -backend-config=backend.hcl
+bucket = "whiteboard-tfstate-<account-id>" # bootstrap output: state_bucket
+region = "ap-south-1"

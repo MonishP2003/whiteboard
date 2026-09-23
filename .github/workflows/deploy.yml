@@ -1,0 +1,101 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+# Two merges never deploy at the same time; the later one waits.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  image:
+    # Native ARM runner. If it isn't available for this repo, switch to
+    # ubuntu-24.04 and add docker/setup-qemu-action before buildx (slower).
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      matrix:
+        service: [api, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: aws-actions/amazon-ecr-login@v2
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.service }}/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ matrix.service == 'api' && vars.ECR_API_REPOSITORY_URL || vars.ECR_FRONTEND_REPOSITORY_URL }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+          provenance: false
+
+  # API first: it runs the (additive) migrations, and the new frontend may call
+  # new endpoints.
+  deploy-api:
+    needs: image
+    runs-on: ubuntu-24.04
+    env:
+      ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Upload deploy files
+        run: aws s3 cp infra/docker/api/ "s3://$ARTIFACTS_BUCKET/deploy/api/" --recursive
+
+      - name: Deploy API via SSM
+        run: >
+          bash .github/scripts/ssm-deploy.sh api
+          "${{ vars.API_INSTANCE_ID }}" "${{ vars.ECR_API_REPOSITORY_URL }}" "$IMAGE_TAG"
+
+      - name: Wait for /api/health
+        run: |
+          url="https://${{ vars.CLOUDFRONT_DOMAIN }}/api/health"
+          for _ in $(seq 1 12); do
+            if curl -fsS --max-time 5 "$url"; then echo; exit 0; fi
+            sleep 5
+          done
+          echo "Health check failed: $url" >&2
+          exit 1
+
+  deploy-frontend:
+    needs: deploy-api
+    runs-on: ubuntu-24.04
+    env:
+      ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Upload deploy files
+        run: aws s3 cp infra/docker/frontend/ "s3://$ARTIFACTS_BUCKET/deploy/frontend/" --recursive
+
+      # deploy.sh waits for the container's /healthz before returning.
+      - name: Deploy frontend via SSM
+        run: >
+          bash .github/scripts/ssm-deploy.sh frontend
+          "${{ vars.FRONTEND_INSTANCE_ID }}" "${{ vars.ECR_FRONTEND_REPOSITORY_URL }}" "$IMAGE_TAG"
+
+      - name: Check the site through CloudFront
+        run: curl -fsS --max-time 10 -o /dev/null -w "%{http_code}\n" "https://${{ vars.CLOUDFRONT_DOMAIN }}/"

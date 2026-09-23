@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: whiteboard
+          POSTGRES_PASSWORD: whiteboard
+          POSTGRES_DB: whiteboard
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U whiteboard -d whiteboard"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://whiteboard:whiteboard@localhost:5432/whiteboard
+      JWT_SECRET: ci-only-secret-that-is-at-least-32-characters-long
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      # Fails when schema.prisma changed without a migration. Uses the CI database as
+      # the shadow DB (Prisma resets it), so it must run before `migrate deploy`.
+      - name: Migration drift check
+        run: >
+          pnpm --filter api exec prisma migrate diff
+          --from-migrations prisma/migrations
+          --to-schema-datamodel prisma/schema.prisma
+          --shadow-database-url "$DATABASE_URL"
+          --exit-code
+      - run: pnpm --filter api exec prisma migrate deploy
+      - run: pnpm test
+      - run: pnpm build
+
+  images:
+    # Native ARM runner: builds the same linux/arm64 images deploy.yml ships.
+    strategy:
+      matrix:
+        service: [api, frontend]
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.service }}/Dockerfile
+          platforms: linux/arm64
+          push: false
+          cache-from: type=gha,scope=${{ matrix.service }}

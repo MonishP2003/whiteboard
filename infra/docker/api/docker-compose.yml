@@ -1,0 +1,55 @@
+# Production stack on the api instance. Run via deploy.sh, which passes
+# --env-file /opt/whiteboard/deploy.env (ECR_REPO, API_IMAGE_TAG, AWS_REGION).
+
+x-local-logging: &local-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - api
+    logging: *local-logging
+
+  api:
+    image: ${ECR_REPO:?}:${API_IMAGE_TAG:?}
+    restart: unless-stopped
+    env_file: /opt/whiteboard/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging:
+      driver: awslogs
+      options:
+        awslogs-group: /whiteboard/prod/api
+        awslogs-region: ${AWS_REGION:?}
+        mode: non-blocking
+        max-buffer-size: 4m
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    command: postgres -c shared_buffers=64MB -c max_connections=20
+    environment:
+      POSTGRES_USER: whiteboard
+      POSTGRES_DB: whiteboard
+    env_file: /opt/whiteboard/postgres.env # POSTGRES_PASSWORD only
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U whiteboard -d whiteboard"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging: *local-logging
+
+volumes:
+  pgdata:

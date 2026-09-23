@@ -1,0 +1,17 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`sceneToSvg > serializes every shape type, rotation, text and arrows 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="725.5" height="465.5" viewBox="-32 -33.5 725.5 465.5">
+<defs><filter id="sticky-shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#000000" flood-opacity="0.18"/></filter></defs><rect x="-32" y="-33.5" width="725.5" height="465.5" fill="#ffffff"/>
+<g transform="translate(0 0)"><rect width="160" height="100" fill="#ffffff" stroke="#1f2937" stroke-width="2"/><text font-size="18" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" text-anchor="middle" fill="#1f2937" xml:space="preserve"><tspan x="80" y="50" dy="0.35em">Start</tspan></text></g>
+<g transform="translate(300 0) rotate(30)" opacity="0.5"><ellipse cx="80" cy="50" rx="80" ry="50" fill="none" stroke="#1f2937" stroke-width="2"/></g>
+<g transform="translate(0 200)"><rect width="200" height="200" rx="2" fill="#fff59d" filter="url(#sticky-shadow)"/><text font-size="24" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" text-anchor="middle" fill="#1f2937" xml:space="preserve"><tspan x="100" y="85" dy="0.35em">Buy &lt;milk&gt;</tspan><tspan x="100" y="115" dy="0.35em">&amp; &quot;eggs&quot;</tspan></text></g>
+<g transform="translate(300 250)"><text font-size="24" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" text-anchor="start" fill="#1f2937" xml:space="preserve"><tspan x="0" y="15" dy="0.35em">Heading</tspan></text></g>
+<g transform="translate(600 0)"><path d="M0 0 Q12 30 20 30 C28 30 32 0 40 0 Q48 0 60 30" fill="none" stroke="#ef4444" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></g>
+<g transform="translate(600 200)"><image width="40" height="20" href="data:image/png;base64,AAAA" preserveAspectRatio="none"/></g>
+<g><line x1="160" y1="60.08" x2="272.85" y2="74.3" stroke="#1f2937" stroke-width="2" stroke-linecap="round"/><polygon points="272.85,74.3 262.3,78.01 263.55,68.09" fill="#1f2937" stroke="#1f2937" stroke-width="2" stroke-linejoin="miter"/><rect x="197.42" y="54.44" width="38" height="25.5" rx="3" fill="#ffffff"/><text font-size="14" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" text-anchor="middle" fill="#1f2937" xml:space="preserve"><tspan x="216.42" y="67.19" dy="0.35em">yes</tspan></text></g>
+<g><line x1="84" y1="100" x2="92" y2="200" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-dasharray="8 6"/><polygon points="84,100 89.78,109.57 79.81,110.37" fill="#3b82f6" stroke="#3b82f6" stroke-width="2" stroke-linejoin="miter"/></g>
+</svg>
+"
+`;

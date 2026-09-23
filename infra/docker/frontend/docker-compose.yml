@@ -1,0 +1,21 @@
+# Production stack on the frontend instance. Run via deploy.sh, which passes
+# --env-file /opt/whiteboard/deploy.env (ECR_REPO, FRONTEND_IMAGE_TAG, AWS_REGION).
+
+services:
+  frontend:
+    image: ${ECR_REPO:?}:${FRONTEND_IMAGE_TAG:?}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging:
+      driver: awslogs
+      options:
+        awslogs-group: /whiteboard/prod/frontend
+        awslogs-region: ${AWS_REGION:?}
+        mode: non-blocking
+        max-buffer-size: 4m

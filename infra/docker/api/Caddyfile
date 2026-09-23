@@ -1,0 +1,4 @@
+# Plain HTTP: CloudFront terminates TLS.
+:80 {
+	reverse_proxy api:3000
+}
