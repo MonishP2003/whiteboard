@@ -66,3 +66,27 @@ body,
   margin: 0;
   overflow: hidden;
 }
+
+/* Auth page illustration. */
+@keyframes auth-float {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -6px;
+  }
+}
+
+@keyframes auth-cursor {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  35% {
+    translate: 22px 14px;
+  }
+  70% {
+    translate: -10px 26px;
+  }
+}

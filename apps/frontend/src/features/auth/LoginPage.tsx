@@ -3,6 +3,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Link, useLocation, useNavigate } from "react-router";
 import { LoginBodySchema, type LoginBody } from "@whiteboard/shared";
 import type { LoginRedirectState } from "@/app/RequireAuth";
+import { ArrowRight, Loader2, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -12,10 +13,9 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
-import { AuthCard, FormError } from "./AuthCard";
+import { AuthCard, FormError, IconInput, PasswordInput } from "./AuthCard";
 
 export function LoginPage() {
   const login = useAuthStore((s) => s.login);
@@ -44,14 +44,14 @@ export function LoginPage() {
   return (
     <AuthCard
       title="Log in"
-      description="Welcome back."
+      description="Welcome back. Log in to pick up where you left off."
       footer={
         <span>
           No account?{" "}
           <Link
             to="/register"
             state={{ from }}
-            className="text-foreground underline underline-offset-4"
+            className="font-medium text-foreground underline-offset-4 hover:underline"
           >
             Sign up
           </Link>
@@ -67,7 +67,14 @@ export function LoginPage() {
               <FormItem>
                 <FormLabel>Email</FormLabel>
                 <FormControl>
-                  <Input type="email" autoComplete="email" autoFocus {...field} />
+                  <IconInput
+                    icon={Mail}
+                    type="email"
+                    placeholder="you@example.com"
+                    autoComplete="email"
+                    autoFocus
+                    {...field}
+                  />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -80,15 +87,34 @@ export function LoginPage() {
               <FormItem>
                 <FormLabel>Password</FormLabel>
                 <FormControl>
-                  <Input type="password" autoComplete="current-password" {...field} />
+                  <PasswordInput
+                    placeholder="••••••••"
+                    autoComplete="current-password"
+                    {...field}
+                  />
                 </FormControl>
                 <FormMessage />
               </FormItem>
             )}
           />
           <FormError message={form.formState.errors.root?.message} />
-          <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
-            {form.formState.isSubmitting ? "Logging in…" : "Log in"}
+          <Button
+            type="submit"
+            size="lg"
+            className="group h-11 w-full"
+            disabled={form.formState.isSubmitting}
+          >
+            {form.formState.isSubmitting ? (
+              <>
+                <Loader2 className="animate-spin" />
+                Logging in…
+              </>
+            ) : (
+              <>
+                Log in
+                <ArrowRight className="transition-transform group-hover:translate-x-0.5" />
+              </>
+            )}
           </Button>
         </form>
       </Form>
