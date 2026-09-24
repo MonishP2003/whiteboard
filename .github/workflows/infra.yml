@@ -1,0 +1,145 @@
+name: Infra
+
+# envs/prod only. bootstrap is applied by hand (local state); CI just validates it.
+on:
+  pull_request:
+    paths: ["infra/terraform/**", ".github/workflows/infra.yml"]
+  push:
+    branches: [main]
+    paths: ["infra/terraform/**", ".github/workflows/infra.yml"]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: "1"
+  TF_INPUT: "0"
+  TF_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
+  TF_VERSION: "~1.16.0"
+  TF_INIT: >-
+    terraform init
+    -backend-config=bucket=${{ vars.TF_STATE_BUCKET }}
+    -backend-config=region=${{ vars.AWS_REGION }}
+
+defaults:
+  run:
+    working-directory: infra/terraform/envs/prod
+
+jobs:
+  # PRs: posts the plan as a comment. main: the plan the reviewer looks at (job
+  # summary) before approving the apply job.
+  plan:
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: infra-plan-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    outputs:
+      changes: ${{ steps.plan.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        working-directory: infra/terraform
+        run: terraform fmt -check -recursive -diff
+
+      - name: Validate bootstrap
+        working-directory: infra/terraform/bootstrap
+        run: terraform init -backend=false && terraform validate -no-color
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - run: $TF_INIT
+      - run: terraform validate -no-color
+
+      # -lock=false: the plan role can't write the lock file, and a PR plan must never
+      # block an apply. -detailed-exitcode: 0 no changes, 1 error, 2 changes.
+      - name: terraform plan
+        id: plan
+        run: |
+          set +e
+          terraform plan -lock=false -no-color -detailed-exitcode -out=tfplan > plan.log 2>&1
+          code=$?
+          set -e
+          cat plan.log
+          if [ "$code" = 1 ]; then cp plan.log plan.txt; else terraform show -no-color tfplan > plan.txt; fi
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+          echo "changes=$([ "$code" = 2 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Terraform plan (envs/prod)"
+            echo '```'
+            tail -c 60000 plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment the plan on the PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          EXITCODE: ${{ steps.plan.outputs.exitcode }}
+        with:
+          script: |
+            const fs = require("fs");
+            const marker = "<!-- terraform-plan:envs/prod -->";
+            const max = 60000; // a comment holds 65536 characters
+            let plan = fs.readFileSync("infra/terraform/envs/prod/plan.txt", "utf8").trim();
+            if (plan.length > max) {
+              const summary = plan.split("\n").filter((l) => /^(Plan:|No changes)/.test(l)).join("\n");
+              plan = `${plan.slice(0, max)}\n\n… truncated; the full plan is in the workflow log.\n${summary}`;
+            }
+            const status = { 0: "no changes", 2: "changes", 1: "**failed**" }[process.env.EXITCODE];
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `${marker}\n### Terraform plan: envs/prod (${status})\n\n` +
+              `Commit ${context.payload.pull_request.head.sha.slice(0, 7)} · [run](${run})\n\n` +
+              `<details${process.env.EXITCODE === "0" ? "" : " open"}><summary>Show plan</summary>\n\n` +
+              "```\n" + plan + "\n```\n</details>";
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const existing = comments.find((c) => c.body?.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: Fail if the plan failed
+        if: steps.plan.outputs.exitcode == '1'
+        run: exit 1
+
+  # Waits for a required reviewer on the "production" environment. Re-plans with the
+  # lock held and applies exactly that plan (the plan artifact isn't reused because
+  # it contains the refreshed SecureString values).
+  apply:
+    needs: plan
+    if: github.event_name == 'push' && needs.plan.outputs.changes == 'true'
+    runs-on: ubuntu-24.04
+    environment: production
+    concurrency:
+      group: infra-apply
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - run: $TF_INIT
+      - run: terraform plan -no-color -out=tfplan
+      - run: terraform apply -no-color tfplan

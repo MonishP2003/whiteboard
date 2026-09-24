@@ -9,7 +9,7 @@ variable "project" {
 }
 
 variable "github_repo" {
-  description = "owner/repo allowed to assume the deploy role (main branch only)."
+  description = "owner/repo whose workflows may assume the CI roles."
   type        = string
   default     = "MonishP2003/whiteboard"
 }

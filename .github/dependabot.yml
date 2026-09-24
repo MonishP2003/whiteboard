@@ -1,0 +1,32 @@
+version: 2
+
+# Weekly, grouped so there's one PR per ecosystem most weeks. Majors come as their
+# own PRs (npm) or not at all (Docker base images: bump Node/Postgres deliberately).
+updates:
+  - package-ecosystem: npm # pnpm workspace; covers every package.json and pnpm-lock.yaml
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directories: [/apps/api, /apps/frontend]
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      base-images:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

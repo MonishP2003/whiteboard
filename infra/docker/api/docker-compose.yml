@@ -23,6 +23,11 @@ services:
     image: ${ECR_REPO:?}:${API_IMAGE_TAG:?}
     restart: unless-stopped
     env_file: /opt/whiteboard/.env
+    environment:
+      APP_VERSION: ${API_IMAGE_TAG:?} # reported by /api/health
+      TRUST_PROXY_HOPS: 2 # Caddy + CloudFront
+    # server.ts closes Fastify (drains requests, disconnects Prisma) on SIGTERM.
+    stop_grace_period: 20s
     depends_on:
       postgres:
         condition: service_healthy

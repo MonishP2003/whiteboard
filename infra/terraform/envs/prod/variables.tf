@@ -21,6 +21,12 @@ variable "frontend_instance_type" {
 }
 
 variable "alert_email" {
-  description = "Receives the AWS Budget alert."
+  description = "Receives budget alerts, CloudWatch alarms and backup failures (confirm the SNS email once)."
   type        = string
+}
+
+variable "credit_burn_budget_usd" {
+  description = "Warn when forecast monthly usage before credits exceeds this. null: off."
+  type        = number
+  default     = null
 }

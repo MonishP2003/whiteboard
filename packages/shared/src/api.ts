@@ -3,6 +3,8 @@ import { SceneSchema } from "./scene";
 
 export const HealthResponseSchema = z.object({
   status: z.enum(["ok", "db_unavailable"]),
+  /** Image tag (commit SHA) of the running API; "dev" locally. */
+  version: z.string(),
 });
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 

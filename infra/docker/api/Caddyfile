@@ -1,3 +1,11 @@
+{
+	servers {
+		# Only CloudFront can reach port 80 (security group), so keep its
+		# X-Forwarded-For (the viewer's IP) instead of replacing it with CloudFront's.
+		trusted_proxies static 0.0.0.0/0 ::/0
+	}
+}
+
 # Plain HTTP: CloudFront terminates TLS.
 :80 {
 	reverse_proxy api:3000

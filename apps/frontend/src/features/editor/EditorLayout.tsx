@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CanvasStage } from "@/canvas/Stage";
 import { AiPromptBar } from "@/features/ai-prompt/AiPromptBar";
+import { PaywallDialog } from "@/features/billing/PaywallDialog";
 import type { SaveStatus } from "@/features/boards/useAutosave";
 import { FormatPanel } from "@/features/format-panel/FormatPanel";
 import { ShapeDrawer } from "@/features/shape-drawer/ShapeDrawer";
@@ -61,6 +62,7 @@ export function EditorLayout({
         <FormatPanel />
         <AiPromptBar />
         <ZoomControls />
+        <PaywallDialog />
       </div>
     </TooltipProvider>
   );

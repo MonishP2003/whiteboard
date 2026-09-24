@@ -10,6 +10,10 @@ try {
 // Integration tests truncate every table, so locally they run against a separate database.
 if (process.env.TEST_DATABASE_URL) process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
 process.env.NODE_ENV = "test";
+// Tests sign webhook bodies with this secret and never call Razorpay (so /payments/order is 503).
+process.env.RAZORPAY_WEBHOOK_SECRET = "test_webhook_secret";
+delete process.env.RAZORPAY_KEY_ID;
+delete process.env.RAZORPAY_KEY_SECRET;
 
 export default defineConfig({
   test: {

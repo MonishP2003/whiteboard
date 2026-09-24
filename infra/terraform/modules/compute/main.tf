@@ -20,10 +20,15 @@ variable "ssm_parameter_path" {
   default     = null
 }
 
-variable "artifacts_write" {
-  description = "Allow writes to the artifacts bucket (backups). Otherwise read-only, enough to sync deploy files."
-  type        = bool
-  default     = false
+variable "artifacts_read_prefixes" {
+  description = "Key prefixes in the artifacts bucket the instance may list and read, e.g. deploy/api/."
+  type        = list(string)
+}
+
+variable "artifacts_write_prefixes" {
+  description = "Key prefixes the instance may also write and delete (backups). Empty: read-only."
+  type        = list(string)
+  default     = []
 }
 
 variable "tags" {
@@ -77,6 +82,7 @@ resource "aws_iam_role_policy_attachment" "managed" {
 
 locals {
   read_parameters      = var.ssm_parameter_path != null
+  artifacts_prefixes   = distinct(concat(var.artifacts_read_prefixes, var.artifacts_write_prefixes))
   parameter_arn_prefix = "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter${coalesce(var.ssm_parameter_path, "/none")}"
 }
 
@@ -108,12 +114,26 @@ data "aws_iam_policy_document" "instance" {
     sid       = "ArtifactsList"
     actions   = ["s3:ListBucket"]
     resources = [var.artifacts_bucket_arn]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = [for p in local.artifacts_prefixes : "${p}*"]
+    }
   }
 
   statement {
-    sid       = var.artifacts_write ? "ArtifactsReadWrite" : "ArtifactsRead"
-    actions   = var.artifacts_write ? ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"] : ["s3:GetObject"]
-    resources = ["${var.artifacts_bucket_arn}/*"]
+    sid       = "ArtifactsRead"
+    actions   = ["s3:GetObject"]
+    resources = [for p in local.artifacts_prefixes : "${var.artifacts_bucket_arn}/${p}*"]
+  }
+
+  dynamic "statement" {
+    for_each = length(var.artifacts_write_prefixes) > 0 ? [1] : []
+    content {
+      sid       = "ArtifactsWrite"
+      actions   = ["s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload"]
+      resources = [for p in var.artifacts_write_prefixes : "${var.artifacts_bucket_arn}/${p}*"]
+    }
   }
 }
 

@@ -36,7 +36,9 @@ export function LoginPage() {
         message:
           err instanceof ApiError && err.code === "INVALID_CREDENTIALS"
             ? "Wrong email or password."
-            : "Couldn't log in. Try again.",
+            : err instanceof ApiError && err.code === "RATE_LIMITED"
+              ? "Too many attempts. Wait a minute and try again."
+              : "Couldn't log in. Try again.",
       });
     }
   });

@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { ArrowLeft, Download, LogOut, Redo2, Undo2 } from "lucide-react";
+import { ArrowLeft, Download, LogOut, Redo2, Sparkles, Undo2 } from "lucide-react";
 import type { SaveBoardBody } from "@whiteboard/shared";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,7 +18,9 @@ import { redo, undo, useCanRedo, useCanUndo } from "@/store/history";
 import { useSceneStore } from "@/store/sceneStore";
 import { useUiStore } from "@/store/uiStore";
 import { cn } from "@/lib/utils";
-import { useAuthStore } from "@/store/authStore";
+import { isPro, useAuthStore } from "@/store/authStore";
+import { formatDate } from "@/features/billing/format";
+import { openPaywall } from "@/features/billing/paywallStore";
 import { FloatingPanel, IconButton, MOD_KEY } from "@/features/editor/FloatingPanel";
 import type { SaveStatus } from "@/features/boards/useAutosave";
 
@@ -209,8 +211,7 @@ function AccountMenu({ flush }: { flush: () => Promise<void> }) {
   const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigate();
 
-  const isPro =
-    subscription?.status === "ACTIVE" && new Date(subscription.expiresAt).getTime() > Date.now();
+  const pro = isPro(subscription);
   const initial = (user?.name || user?.email || "?").charAt(0).toUpperCase();
 
   const onLogout = async () => {
@@ -240,13 +241,22 @@ function AccountMenu({ flush }: { flush: () => Promise<void> }) {
           <span
             className={cn(
               "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium",
-              isPro ? "bg-amber-100 text-amber-800" : "bg-muted text-muted-foreground",
+              pro ? "bg-amber-100 text-amber-800" : "bg-muted text-muted-foreground",
             )}
           >
-            {isPro ? "Pro" : "Free"}
+            {pro ? "Pro" : "Free"}
           </span>
         </DropdownMenuLabel>
+        {subscription && (
+          <p className="px-2 pb-1.5 text-xs text-muted-foreground">
+            {pro ? "Pro until " : "Pro expired on "}
+            {formatDate(subscription.expiresAt)}
+          </p>
+        )}
         <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => openPaywall()}>
+          <Sparkles /> {pro ? "Extend Pro" : "Upgrade to Pro"}
+        </DropdownMenuItem>
         <DropdownMenuItem onSelect={onLogout}>
           <LogOut /> Log out
         </DropdownMenuItem>

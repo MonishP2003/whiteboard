@@ -12,9 +12,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { openPaywall } from "@/features/billing/paywallStore";
 import { FloatingPanel } from "@/features/editor/FloatingPanel";
 import { api, ApiError } from "@/lib/api";
 import { preloadElk } from "@/lib/elkLayout";
+import { useAuthStore, useIsPro } from "@/store/authStore";
 import { insertChart } from "./insertChart";
 import { insertDiagram } from "./insertDiagram";
 
@@ -56,6 +58,8 @@ export function AiPromptBar() {
   const [mode, setMode] = useState<Mode>("diagram");
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
+  const pro = useIsPro();
+  const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // Leaving the board abandons a pending request, so nothing lands on another board.
@@ -64,9 +68,12 @@ export function AiPromptBar() {
   const trimmed = prompt.trim();
   const canSubmit = !busy && trimmed.length >= AI_LIMITS.minPromptLength;
 
-  async function submit(e: FormEvent) {
+  function submit(e: FormEvent) {
     e.preventDefault();
-    if (!canSubmit) return;
+    if (canSubmit) void generate(mode, trimmed);
+  }
+
+  async function generate(mode: Mode, trimmed: string) {
     const abort = new AbortController();
     abortRef.current = abort;
     setBusy(true);
@@ -92,6 +99,15 @@ export function AiPromptBar() {
       setPrompt("");
     } catch (err) {
       if (abort.signal.aborted) return;
+      if (err instanceof ApiError && err.status === 402) {
+        // The server is the source of truth; resync in case the badge was stale.
+        useAuthStore
+          .getState()
+          .refresh()
+          .catch(() => {});
+        openPaywall(() => void generate(mode, trimmed));
+        return;
+      }
       console.error(err);
       toast.error(errorMessage(err, mode));
     } finally {
@@ -120,10 +136,18 @@ export function AiPromptBar() {
           </ToggleGroupItem>
         </ToggleGroup>
         <Input
+          ref={inputRef}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          // elkjs is large; start fetching it once the bar is used rather than on page load.
-          onFocus={preloadElk}
+          onFocus={() => {
+            if (!pro) {
+              inputRef.current?.blur();
+              openPaywall();
+              return;
+            }
+            // elkjs is large; start fetching it once the bar is used rather than on page load.
+            preloadElk();
+          }}
           onKeyDown={(e) => {
             if (e.key === "Escape") e.currentTarget.blur();
           }}
@@ -133,6 +157,16 @@ export function AiPromptBar() {
           aria-label={`${mode === "diagram" ? "Diagram" : "Chart"} prompt`}
           className="h-8 min-w-0 border-0 shadow-none focus-visible:ring-0"
         />
+        {!pro && (
+          <button
+            type="button"
+            onClick={() => openPaywall()}
+            title="AI generation is a Pro feature"
+            className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-200"
+          >
+            Pro
+          </button>
+        )}
         <Tooltip>
           <TooltipTrigger asChild>
             <span

@@ -5,6 +5,7 @@ import {
   type UserRepository,
 } from "../repositories/user.repository.js";
 import { AppError } from "../utils/AppError.js";
+import { isSubscriptionActive } from "./subscription.service.js";
 import { hashPassword, signAccessToken, verifyPassword } from "../utils/crypto.js";
 
 export interface AuthResult {
@@ -22,7 +23,7 @@ export function toMeResponse(user: UserRecord, now = new Date()): MeResponse {
     name: user.name,
     subscription: sub && {
       // Expiry is checked at read time, so an overdue ACTIVE row reads as EXPIRED.
-      status: sub.status === "ACTIVE" && sub.expiresAt <= now ? "EXPIRED" : sub.status,
+      status: sub.status === "ACTIVE" && !isSubscriptionActive(sub, now) ? "EXPIRED" : sub.status,
       expiresAt: sub.expiresAt.toISOString(),
     },
   };

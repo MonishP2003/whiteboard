@@ -56,9 +56,19 @@ module "registry" {
   name     = "${var.project}-${each.value}"
 }
 
-module "artifacts" {
-  source      = "../../modules/artifacts"
-  bucket_name = "${local.name}-artifacts-${local.account_id}" # also in bootstrap
+# The artifacts bucket (deploy files + backups) belongs to the bootstrap stack, so
+# destroying this stack keeps the backups. See modules/artifacts/README.md.
+data "aws_s3_bucket" "artifacts" {
+  bucket = "${local.name}-artifacts-${local.account_id}"
+}
+
+# One-time: forget the bucket this stack used to manage without deleting it. Harmless
+# once applied; delete this block after that.
+removed {
+  from = module.artifacts
+  lifecycle {
+    destroy = false
+  }
 }
 
 # Two instances, one per service. Both sit behind CloudFront (see module.cdn)
@@ -66,26 +76,30 @@ module "artifacts" {
 
 # Fastify API + Postgres + Caddy.
 module "api_server" {
-  source               = "../../modules/compute"
-  name                 = "${local.name}-api"
-  tags                 = { service = "api" }
-  instance_type        = var.api_instance_type
-  subnet_id            = module.network.subnet_id
-  security_group_id    = module.network.security_group_id
-  artifacts_bucket_arn = module.artifacts.bucket_arn
-  artifacts_write      = true # Stage 9 backups
-  ssm_parameter_path   = local.ssm_path
+  source             = "../../modules/compute"
+  name               = "${local.name}-api"
+  tags               = { service = "api" }
+  instance_type      = var.api_instance_type
+  subnet_id          = module.network.subnet_id
+  security_group_id  = module.network.security_group_id
+  ssm_parameter_path = local.ssm_path
+
+  artifacts_bucket_arn     = data.aws_s3_bucket.artifacts.arn
+  artifacts_read_prefixes  = ["deploy/api/"]
+  artifacts_write_prefixes = ["backups/"] # backup.sh / restore.sh
 }
 
 # Static React build served by Caddy. No secrets, no database.
 module "frontend_server" {
-  source               = "../../modules/compute"
-  name                 = "${local.name}-frontend"
-  tags                 = { service = "frontend" }
-  instance_type        = var.frontend_instance_type
-  subnet_id            = module.network.subnet_id
-  security_group_id    = module.network.security_group_id
-  artifacts_bucket_arn = module.artifacts.bucket_arn
+  source            = "../../modules/compute"
+  name              = "${local.name}-frontend"
+  tags              = { service = "frontend" }
+  instance_type     = var.frontend_instance_type
+  subnet_id         = module.network.subnet_id
+  security_group_id = module.network.security_group_id
+
+  artifacts_bucket_arn    = data.aws_s3_bucket.artifacts.arn
+  artifacts_read_prefixes = ["deploy/frontend/"]
 }
 
 module "cdn" {
@@ -97,17 +111,32 @@ module "cdn" {
 
 module "observability" {
   source = "../../modules/observability"
+  name   = local.name
   log_group_names = {
     api      = "${local.ssm_path}/api"
     frontend = "${local.ssm_path}/frontend"
   }
-  budget_name = local.name
-  alert_email = var.alert_email
+  instance_ids = {
+    api      = module.api_server.instance_id
+    frontend = module.frontend_server.instance_id
+  }
+  budget_name            = local.name
+  credit_burn_budget_usd = var.credit_burn_budget_usd
+  alert_email            = var.alert_email
+}
+
+module "backup" {
+  source           = "../../modules/backup"
+  name             = local.name
+  instance_id      = module.api_server.instance_id
+  artifacts_bucket = data.aws_s3_bucket.artifacts.bucket
+  alerts_topic_arn = module.observability.alerts_topic_arn
 }
 
 # --- State moves from the single-instance layout -----------------------------
-# Keep the existing api instance, ECR repo, distribution and artifacts bucket.
-# The S3 web bucket, its OAC and the SPA-rewrite function are destroyed.
+# Keep the existing api instance, ECR repo and distribution. The S3 web bucket, its
+# OAC and the SPA-rewrite function are destroyed. (The artifacts bucket moves were
+# dropped in Stage 9, when the bucket left this stack.)
 
 moved {
   from = module.compute
@@ -125,21 +154,6 @@ moved {
 }
 
 moved {
-  from = module.frontend.aws_s3_bucket.artifacts
-  to   = module.artifacts.aws_s3_bucket.artifacts
-}
-
-moved {
-  from = module.frontend.aws_s3_bucket_public_access_block.this["artifacts"]
-  to   = module.artifacts.aws_s3_bucket_public_access_block.artifacts
-}
-
-moved {
-  from = module.frontend.aws_s3_bucket_server_side_encryption_configuration.artifacts
-  to   = module.artifacts.aws_s3_bucket_server_side_encryption_configuration.artifacts
-}
-
-moved {
   from = module.observability.aws_cloudwatch_log_group.api
   to   = module.observability.aws_cloudwatch_log_group.service["api"]
 }
@@ -148,10 +162,18 @@ moved {
 #   aws ssm put-parameter --overwrite --type SecureString --name ... --value ...
 # deploy.sh writes every parameter under this path into /opt/whiteboard/.env.
 resource "aws_ssm_parameter" "app" {
-  for_each = toset(["DATABASE_URL", "JWT_SECRET", "POSTGRES_PASSWORD", "GEMINI_API_KEY"])
-  name     = "${local.ssm_path}/${each.value}"
-  type     = "SecureString"
-  value    = "change-me"
+  for_each = toset([
+    "DATABASE_URL",
+    "JWT_SECRET",
+    "POSTGRES_PASSWORD",
+    "GEMINI_API_KEY",
+    "RAZORPAY_KEY_ID",
+    "RAZORPAY_KEY_SECRET",
+    "RAZORPAY_WEBHOOK_SECRET",
+  ])
+  name  = "${local.ssm_path}/${each.value}"
+  type  = "SecureString"
+  value = "change-me"
 
   lifecycle {
     ignore_changes = [value]

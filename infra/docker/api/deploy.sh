@@ -1,6 +1,7 @@
 #!/bin/bash
 # Deploy an API image tag on the api instance. Run as root (via SSM send-command):
 #   ECR_REPO=<account>.dkr.ecr.<region>.amazonaws.com/whiteboard-api deploy.sh <tag>
+# The tag it replaces is saved to previous.env for rollback.sh.
 set -euo pipefail
 
 TAG="${1:?usage: deploy.sh <image-tag>}"
@@ -36,11 +37,16 @@ aws ecr get-login-password --region "$AWS_REGION" |
   docker login --username AWS --password-stdin "${ECR_REPO%%/*}"
 
 echo "==> 3. Image tag $TAG"
-cat > deploy.env <<EOF
+# Re-deploying the same tag keeps the older previous.env.
+if [ -f deploy.env ] && ! grep -qx "API_IMAGE_TAG=$TAG" deploy.env; then
+  cp deploy.env previous.env
+  echo "    previous: $(grep '^API_IMAGE_TAG=' previous.env)"
+fi
+cat > deploy.env <<ENV
 ECR_REPO=$ECR_REPO
 API_IMAGE_TAG=$TAG
 AWS_REGION=$AWS_REGION
-EOF
+ENV
 
 echo "==> 4. Pull"
 compose pull api
@@ -48,11 +54,22 @@ compose pull api
 echo "==> 5. Postgres"
 compose up -d --wait postgres
 
+# Migrations must stay additive: rollback.sh restores the old image, not the old schema.
 echo "==> 6. Migrations"
 compose run --rm -T api npx prisma migrate deploy
 
 echo "==> 7. Start api + caddy"
 compose up -d --remove-orphans api caddy
+# Caddy only reads its (bind-mounted) Caddyfile at start; recreate it when the file changed.
+caddyfile_sum=$(sha256sum Caddyfile | cut -d ' ' -f 1)
+if [ "$caddyfile_sum" != "$(cat .caddyfile.sha256 2>/dev/null || true)" ]; then
+  compose up -d --force-recreate caddy
+  echo "$caddyfile_sum" > .caddyfile.sha256
+fi
+
+# Unused images older than a week. The previous tag's image may go too; rollback.sh
+# pulls it again from ECR (which keeps the last 10).
 docker image prune -f >/dev/null
+docker image prune -af --filter "until=168h" >/dev/null
 
 echo "==> Deployed $TAG"

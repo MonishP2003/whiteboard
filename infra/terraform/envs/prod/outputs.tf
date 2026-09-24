@@ -25,9 +25,13 @@ output "github_variables" {
     AWS_REGION                  = var.region
     ECR_API_REPOSITORY_URL      = module.registry["api"].repository_url
     ECR_FRONTEND_REPOSITORY_URL = module.registry["frontend"].repository_url
-    ARTIFACTS_BUCKET            = module.artifacts.bucket
+    ARTIFACTS_BUCKET            = data.aws_s3_bucket.artifacts.bucket
     CLOUDFRONT_DOMAIN           = module.cdn.distribution_domain
     API_INSTANCE_ID             = module.api_server.instance_id
     FRONTEND_INSTANCE_ID        = module.frontend_server.instance_id
   }
+}
+
+output "alerts_topic_arn" {
+  value = module.observability.alerts_topic_arn
 }

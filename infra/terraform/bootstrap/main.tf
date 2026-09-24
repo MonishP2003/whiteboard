@@ -1,5 +1,6 @@
-# One-time bootstrap: Terraform state bucket, GitHub OIDC provider and the
-# main-only deploy role. Applied by hand with local state; see README.md.
+# One-time bootstrap: Terraform state bucket, artifacts bucket (deploy files +
+# backups), GitHub OIDC provider and the CI roles. Applied by hand with local
+# state; see infra/README.md.
 
 terraform {
   required_version = ">= 1.10"
@@ -58,6 +59,15 @@ resource "aws_s3_bucket_public_access_block" "state" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+}
+
+# --- Artifacts bucket -----------------------------------------------------------
+# Here rather than in envs/prod so that destroying prod keeps the database backups.
+# See modules/artifacts/README.md.
+
+module "artifacts" {
+  source      = "../modules/artifacts"
+  bucket_name = local.artifacts_bucket
 }
 
 # --- GitHub OIDC ------------------------------------------------------------
@@ -172,4 +182,142 @@ resource "aws_iam_role_policy" "deploy" {
   name   = "deploy"
   role   = aws_iam_role.deploy.id
   policy = data.aws_iam_policy_document.deploy.json
+}
+
+# --- Terraform plan (infra.yml: pull requests and main) -----------------------
+# Read-only. Plans run with -lock=false, so no write access to the state bucket.
+
+data "aws_iam_policy_document" "plan_trust" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github.arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values = [
+        "repo:${var.github_repo}:pull_request",
+        "repo:${var.github_repo}:ref:refs/heads/main",
+      ]
+    }
+  }
+}
+
+resource "aws_iam_role" "plan" {
+  name               = "gh-actions-plan"
+  assume_role_policy = data.aws_iam_policy_document.plan_trust.json
+}
+
+resource "aws_iam_role_policy_attachment" "plan_read_only" {
+  role       = aws_iam_role.plan.name
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
+}
+
+data "aws_iam_policy_document" "plan" {
+  # Refreshing aws_ssm_parameter reads SecureString values, which needs the aws/ssm key.
+  statement {
+    sid       = "DecryptSsmParameters"
+    actions   = ["kms:Decrypt"]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["ssm.${var.region}.amazonaws.com"]
+    }
+  }
+
+  # ReadOnlyAccess would otherwise let any PR's workflow download the database dumps.
+  statement {
+    sid       = "NoBackups"
+    effect    = "Deny"
+    actions   = ["s3:GetObject", "s3:GetObjectVersion"]
+    resources = ["${module.artifacts.bucket_arn}/backups/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "plan" {
+  name   = "plan"
+  role   = aws_iam_role.plan.id
+  policy = data.aws_iam_policy_document.plan.json
+}
+
+# --- Terraform apply (infra.yml: the production environment) -----------------
+# Only jobs in the "production" GitHub environment (required reviewer) get this
+# token subject, so every apply waits for an approval.
+
+data "aws_iam_policy_document" "apply_trust" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github.arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:${var.github_repo}:environment:production"]
+    }
+  }
+}
+
+resource "aws_iam_role" "apply" {
+  name               = "gh-actions-apply"
+  assume_role_policy = data.aws_iam_policy_document.apply_trust.json
+}
+
+# Everything except IAM (and Organizations/Account)...
+resource "aws_iam_role_policy_attachment" "apply_power_user" {
+  role       = aws_iam_role.apply.name
+  policy_arn = "arn:aws:iam::aws:policy/PowerUserAccess"
+}
+
+data "aws_iam_policy_document" "apply" {
+  # ...plus IAM for the prod stack's own instance roles only.
+  statement {
+    sid     = "ProdInstanceRoles"
+    actions = ["iam:*"]
+    resources = [
+      "arn:aws:iam::${local.account_id}:role/${var.project}-prod-*",
+      "arn:aws:iam::${local.account_id}:instance-profile/${var.project}-prod-*",
+    ]
+  }
+
+  statement {
+    sid       = "ReadManagedPolicies"
+    actions   = ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions"]
+    resources = ["arn:aws:iam::aws:policy/*"]
+  }
+
+  # Guard rails: prod never deletes these buckets or the backups.
+  statement {
+    sid       = "KeepBuckets"
+    effect    = "Deny"
+    actions   = ["s3:DeleteBucket", "s3:DeleteBucketPolicy", "s3:PutBucketPolicy", "s3:PutLifecycleConfiguration"]
+    resources = [aws_s3_bucket.state.arn, module.artifacts.bucket_arn]
+  }
+
+  statement {
+    sid       = "KeepBackups"
+    effect    = "Deny"
+    actions   = ["s3:DeleteObject", "s3:DeleteObjectVersion"]
+    resources = ["${module.artifacts.bucket_arn}/backups/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "apply" {
+  name   = "apply"
+  role   = aws_iam_role.apply.id
+  policy = data.aws_iam_policy_document.apply.json
 }
