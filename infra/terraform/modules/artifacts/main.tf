@@ -9,7 +9,7 @@ variable "backup_retention_days" {
 
 # Holds deploy/<service>/ (files deploy.yml syncs to each instance) and backups/
 # (nightly pg_dump). Managed by the bootstrap stack so `terraform destroy` of
-# envs/prod never takes the backups with it; see README.md.
+# envs/prod never takes the backups with it; see the root README.md.
 resource "aws_s3_bucket" "artifacts" {
   bucket        = var.bucket_name
   force_destroy = false

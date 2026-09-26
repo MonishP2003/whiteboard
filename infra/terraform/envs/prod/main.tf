@@ -57,7 +57,7 @@ module "registry" {
 }
 
 # The artifacts bucket (deploy files + backups) belongs to the bootstrap stack, so
-# destroying this stack keeps the backups. See modules/artifacts/README.md.
+# destroying this stack keeps the backups. See the root README.md.
 data "aws_s3_bucket" "artifacts" {
   bucket = "${local.name}-artifacts-${local.account_id}"
 }

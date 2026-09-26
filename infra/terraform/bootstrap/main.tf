@@ -1,6 +1,6 @@
 # One-time bootstrap: Terraform state bucket, artifacts bucket (deploy files +
 # backups), GitHub OIDC provider and the CI roles. Applied by hand with local
-# state; see infra/README.md.
+# state; see the root README.md.
 
 terraform {
   required_version = ">= 1.10"
@@ -63,7 +63,7 @@ resource "aws_s3_bucket_public_access_block" "state" {
 
 # --- Artifacts bucket -----------------------------------------------------------
 # Here rather than in envs/prod so that destroying prod keeps the database backups.
-# See modules/artifacts/README.md.
+# See "The artifacts bucket" in the root README.md.
 
 module "artifacts" {
   source      = "../modules/artifacts"
